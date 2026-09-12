@@ -26,38 +26,44 @@ const budgetOptions = [
 ];
 
 export default function ContactPage() {
-  const [draftReady, setDraftReady] = useState(false);
+  const [formState, setFormState] = useState<
+    'idle' | 'submitting' | 'success' | 'error'
+  >('idle');
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const data = new FormData(event.currentTarget);
+    if (formState === 'submitting') return;
 
-    if (String(data.get('website') || '').trim()) return;
+    const form = event.currentTarget;
+    const data = new FormData(form);
 
-    const name = String(data.get('name') || '').trim();
-    const email = String(data.get('email') || '').trim();
-    const company = String(data.get('company') || '').trim();
-    const projectType = String(data.get('projectType') || '').trim();
-    const budget = String(data.get('budget') || '').trim();
-    const message = String(data.get('message') || '').trim();
-    const subject = encodeURIComponent(
-      `${projectType || 'Project'} inquiry from ${name}`,
-    );
-    const body = encodeURIComponent(
-      [
-        `Name: ${name}`,
-        `Email: ${email}`,
-        `Company / Business: ${company || 'Not provided'}`,
-        `Project type: ${projectType}`,
-        `Budget: ${budget || 'Not provided'}`,
-        '',
-        'Message:',
-        message,
-      ].join('\n'),
-    );
+    setFormState('submitting');
 
-    setDraftReady(true);
-    window.location.href = `mailto:micomedillen1997@gmail.com?subject=${subject}&body=${body}`;
+    try {
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: String(data.get('name') || ''),
+          email: String(data.get('email') || ''),
+          company: String(data.get('company') || ''),
+          project_type: String(data.get('projectType') || ''),
+          budget: String(data.get('budget') || ''),
+          message: String(data.get('message') || ''),
+          website: String(data.get('website') || ''),
+        }),
+      });
+      const result = (await response.json()) as { success?: boolean };
+
+      if (!response.ok || !result.success) {
+        throw new Error('Contact submission was not stored.');
+      }
+
+      form.reset();
+      setFormState('success');
+    } catch {
+      setFormState('error');
+    }
   };
 
   return (
@@ -198,16 +204,35 @@ export default function ContactPage() {
 
           <div className="form-submit-row">
             <span>And I’m ready to</span>
-            <button type="submit">
-              <VerticalTextLabel text="Send Message" />
+            <button type="submit" disabled={formState === 'submitting'}>
+              <VerticalTextLabel
+                text={
+                  formState === 'submitting' ? 'Sending...' : 'Send Message'
+                }
+              />
               <span aria-hidden="true">↗</span>
             </button>
           </div>
 
-          <p className="contact-form-status" aria-live="polite">
-            {draftReady
-              ? 'Your email draft is ready. Send it from your email app to complete your message.'
-              : 'Submitting opens a prefilled email draft in your email app.'}
+          <p
+            className="contact-form-status"
+            data-state={formState}
+            aria-live="polite"
+          >
+            {formState === 'success' ? (
+              <>
+                <strong>Message received.</strong>
+                <br />
+                Thanks for reaching out. Your project details have been sent
+                successfully.
+              </>
+            ) : formState === 'error' ? (
+              'Something went wrong while sending your message. Please try again.'
+            ) : formState === 'submitting' ? (
+              'Sending your project details…'
+            ) : (
+              'Your project details will be sent securely.'
+            )}
           </p>
         </form>
       </main>

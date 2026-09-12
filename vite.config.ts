@@ -13,6 +13,9 @@ export default defineConfig({
   plugins: [
     tailwindcss(),
     vinext(),
-    nitro({ preset: process.env.NITRO_PRESET || 'vercel' }),
+    nitro({
+      preset: process.env.NITRO_PRESET || 'vercel',
+      serverDir: 'server',
+    }),
   ],
 });
