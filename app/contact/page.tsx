@@ -1,11 +1,14 @@
 'use client';
 /* oxlint-disable next/no-img-element -- Small local social assets do not need responsive image handling. */
 
-import { useState, type FormEvent } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 import ContactFooter, {
   socialLinks,
   VerticalTextLabel,
 } from '../../components/ContactFooter';
+import TurnstileWidget from '../../components/TurnstileWidget';
+
+const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim();
 
 const projectOptions = [
   'Website / Funnel',
@@ -29,14 +32,48 @@ export default function ContactPage() {
   const [formState, setFormState] = useState<
     'idle' | 'submitting' | 'success' | 'error'
   >('idle');
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileState, setTurnstileState] = useState<
+    'loading' | 'ready' | 'error' | 'unavailable'
+  >(turnstileSiteKey ? 'loading' : 'unavailable');
+  const [turnstileResetSignal, setTurnstileResetSignal] = useState(0);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const handleTurnstileVerify = useCallback((token: string) => {
+    setTurnstileToken(token);
+    setTurnstileState('ready');
+  }, []);
+
+  const handleTurnstileExpire = useCallback(() => {
+    setTurnstileToken(null);
+    setTurnstileState('loading');
+  }, []);
+
+  const handleTurnstileError = useCallback(() => {
+    setTurnstileToken(null);
+    setTurnstileState('error');
+  }, []);
+
+  const resetTurnstile = () => {
+    setTurnstileToken(null);
+    setTurnstileState(turnstileSiteKey ? 'loading' : 'unavailable');
+    setTurnstileResetSignal((current) => current + 1);
+  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (formState === 'submitting') return;
 
+    if (!turnstileToken) {
+      setFormError('Please complete the secure verification and try again.');
+      setFormState('error');
+      return;
+    }
+
     const form = event.currentTarget;
     const data = new FormData(form);
 
+    setFormError(null);
     setFormState('submitting');
 
     try {
@@ -51,18 +88,33 @@ export default function ContactPage() {
           budget: String(data.get('budget') || ''),
           message: String(data.get('message') || ''),
           website: String(data.get('website') || ''),
+          turnstileToken,
         }),
       });
-      const result = (await response.json()) as { success?: boolean };
+      const result = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+      };
 
       if (!response.ok || !result.success) {
-        throw new Error('Contact submission was not stored.');
+        throw new Error(
+          result.error ||
+            'Something went wrong while sending your message. Please try again.',
+        );
       }
 
       form.reset();
+      setFormError(null);
       setFormState('success');
-    } catch {
+      resetTurnstile();
+    } catch (error) {
+      setFormError(
+        error instanceof Error
+          ? error.message
+          : 'Something went wrong while sending your message. Please try again.',
+      );
       setFormState('error');
+      resetTurnstile();
     }
   };
 
@@ -202,9 +254,22 @@ export default function ContactPage() {
             />
           </div>
 
+          <div className="turnstile-row">
+            <TurnstileWidget
+              siteKey={turnstileSiteKey}
+              resetSignal={turnstileResetSignal}
+              onVerify={handleTurnstileVerify}
+              onExpire={handleTurnstileExpire}
+              onError={handleTurnstileError}
+            />
+          </div>
+
           <div className="form-submit-row">
             <span>And I’m ready to</span>
-            <button type="submit" disabled={formState === 'submitting'}>
+            <button
+              type="submit"
+              disabled={formState === 'submitting' || !turnstileToken}
+            >
               <VerticalTextLabel
                 text={
                   formState === 'submitting' ? 'Sending...' : 'Send Message'
@@ -226,10 +291,16 @@ export default function ContactPage() {
                 Thanks for reaching out. Your project details have been sent
                 successfully.
               </>
+            ) : turnstileState === 'unavailable' ? (
+              'Secure verification is temporarily unavailable. Please try again later.'
+            ) : turnstileState === 'error' ? (
+              'Secure verification could not complete. Please refresh and try again.'
             ) : formState === 'error' ? (
-              'Something went wrong while sending your message. Please try again.'
+              formError
             ) : formState === 'submitting' ? (
               'Sending your project details…'
+            ) : turnstileState === 'loading' ? (
+              'Completing secure verification…'
             ) : (
               'Your project details will be sent securely.'
             )}

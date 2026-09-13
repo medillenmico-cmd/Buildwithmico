@@ -4,6 +4,8 @@ import { Resend } from 'resend';
 
 const MAX_BODY_BYTES = 12_000;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const TURNSTILE_VERIFY_URL =
+  'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
 type ContactSubmission = {
   name: string;
@@ -53,6 +55,28 @@ const escapeHtml = (value: string) =>
 
 const normalizeSupabaseUrl = (value: string) =>
   value.replace(/\/rest\/v1\/?$/i, '').replace(/\/$/, '');
+
+const verifyTurnstile = async (token: string, secret: string) => {
+  const body = new FormData();
+  body.set('secret', secret);
+  body.set('response', token);
+
+  const response = await fetch(TURNSTILE_VERIFY_URL, {
+    method: 'POST',
+    body,
+    signal: AbortSignal.timeout(8_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Turnstile verification returned ${response.status}.`);
+  }
+
+  return (await response.json()) as {
+    success?: boolean;
+    action?: string;
+    'error-codes'?: string[];
+  };
+};
 
 const renderField = (label: string, value: string) => `
   <tr>
@@ -123,6 +147,7 @@ export default defineHandler(async (event) => {
   const projectType = readString(input.project_type, 100, true);
   const budget = readString(input.budget, 100, false);
   const message = readString(input.message, 5000, true);
+  const turnstileToken = readString(input.turnstileToken, 2048, true);
 
   if (
     name === null ||
@@ -131,7 +156,8 @@ export default defineHandler(async (event) => {
     company === null ||
     projectType === null ||
     budget === null ||
-    message === null
+    message === null ||
+    turnstileToken === null
   ) {
     return json({ success: false, error: 'Invalid submission.' }, 400);
   }
@@ -141,13 +167,15 @@ export default defineHandler(async (event) => {
   const resendApiKey = process.env.RESEND_API_KEY;
   const contactToEmail = process.env.CONTACT_TO_EMAIL;
   const contactFromEmail = process.env.CONTACT_FROM_EMAIL;
+  const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY;
 
   if (
     !supabaseUrl ||
     !supabaseSecretKey ||
     !resendApiKey ||
     !contactToEmail ||
-    !contactFromEmail
+    !contactFromEmail ||
+    !turnstileSecretKey
   ) {
     console.error('[contact] Required server configuration is missing.');
     return json(
@@ -157,6 +185,37 @@ export default defineHandler(async (event) => {
           'Something went wrong while sending your message. Please try again.',
       },
       500,
+    );
+  }
+
+  try {
+    const verification = await verifyTurnstile(
+      turnstileToken,
+      turnstileSecretKey,
+    );
+
+    if (!verification.success || verification.action !== 'contact_form') {
+      console.warn('[contact] Turnstile verification rejected.', {
+        codes: verification['error-codes'] || [],
+      });
+      return json(
+        {
+          success: false,
+          error: 'Please complete the secure verification and try again.',
+        },
+        400,
+      );
+    }
+  } catch (error) {
+    console.error('[contact] Turnstile verification failed.', {
+      message: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return json(
+      {
+        success: false,
+        error: 'Secure verification is unavailable. Please try again shortly.',
+      },
+      503,
     );
   }
 

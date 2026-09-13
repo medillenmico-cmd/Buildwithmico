@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 
-const COUNT_DURATION = 1500;
+const INTRO_SESSION_KEY = 'buildwithmico:intro-seen';
+const COUNT_DURATION = 1000;
 const BRAND_REVEAL_DURATION = 300;
-const BRAND_HOLD = 950;
+const BRAND_HOLD = 500;
 const EXIT_DURATION = 450;
+const FAILSAFE_DURATION = 2800;
 
 type SiteIntroProps = {
   onReveal: () => void;
@@ -27,6 +29,31 @@ export default function SiteIntro({ onReveal }: SiteIntroProps) {
     const body = document.body;
     const root = document.documentElement;
     const shell = document.querySelector<HTMLElement>('.site-shell');
+    const prefersReducedMotion = window.matchMedia(
+      '(prefers-reduced-motion: reduce)',
+    ).matches;
+    let hasSeenIntro = false;
+
+    try {
+      hasSeenIntro = window.sessionStorage.getItem(INTRO_SESSION_KEY) === '1';
+    } catch {
+      // Storage can be unavailable in strict privacy modes. The intro still works.
+    }
+
+    if (prefersReducedMotion || hasSeenIntro) {
+      const skipTimer = window.setTimeout(() => {
+        revealRef.current();
+        setIsMounted(false);
+      }, 0);
+      return () => window.clearTimeout(skipTimer);
+    }
+
+    try {
+      window.sessionStorage.setItem(INTRO_SESSION_KEY, '1');
+    } catch {
+      // A blocked sessionStorage should never block access to the portfolio.
+    }
+
     const previousBodyOverflow = body.style.overflow;
     const previousRootOverflow = root.style.overflow;
 
@@ -34,9 +61,6 @@ export default function SiteIntro({ onReveal }: SiteIntroProps) {
     body.style.overflow = 'hidden';
     root.style.overflow = 'hidden';
 
-    const prefersReducedMotion = window.matchMedia(
-      '(prefers-reduced-motion: reduce)',
-    ).matches;
     let animationFrame = 0;
     let brandTimer = 0;
     let exitTimer = 0;
@@ -66,34 +90,28 @@ export default function SiteIntro({ onReveal }: SiteIntroProps) {
             prefersReducedMotion ? 140 : EXIT_DURATION,
           );
         },
-        prefersReducedMotion
-          ? 80
-          : BRAND_REVEAL_DURATION + BRAND_HOLD,
+        BRAND_REVEAL_DURATION + BRAND_HOLD,
       );
     };
 
-    if (prefersReducedMotion) {
+    const startedAt = performance.now();
+    const tick = (now: number) => {
+      const elapsed = now - startedAt;
+      const nextProgress = Math.min(elapsed / COUNT_DURATION, 1);
+      setProgress(Math.round(nextProgress * 100));
+      if (nextProgress < 1) {
+        animationFrame = window.requestAnimationFrame(tick);
+        return;
+      }
       finish();
-    } else {
-      const startedAt = performance.now();
-      const tick = (now: number) => {
-        const elapsed = now - startedAt;
-        const nextProgress = Math.min(elapsed / COUNT_DURATION, 1);
-        setProgress(Math.round(nextProgress * 100));
-        if (nextProgress < 1) {
-          animationFrame = window.requestAnimationFrame(tick);
-          return;
-        }
-        finish();
-      };
-      animationFrame = window.requestAnimationFrame(tick);
-    }
+    };
+    animationFrame = window.requestAnimationFrame(tick);
 
     failSafeTimer = window.setTimeout(() => {
       revealRef.current();
       release();
       setIsMounted(false);
-    }, 3700);
+    }, FAILSAFE_DURATION);
 
     return () => {
       window.cancelAnimationFrame(animationFrame);
@@ -107,9 +125,8 @@ export default function SiteIntro({ onReveal }: SiteIntroProps) {
   if (!isMounted) return null;
 
   return (
-    <div
+    <output
       className={`site-intro site-intro--minimal is-${phase}`}
-      role="status"
       aria-live="polite"
       aria-label={
         phase === 'counting' ? 'Loading portfolio' : 'Portfolio ready'
@@ -129,6 +146,6 @@ export default function SiteIntro({ onReveal }: SiteIntroProps) {
         <strong>Portfolio</strong>
         <span>by Mico Medillen</span>
       </div>
-    </div>
+    </output>
   );
 }

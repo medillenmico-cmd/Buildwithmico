@@ -528,32 +528,49 @@ function MetricGrid() {
 
 function FinalCtaVideo() {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const isNearViewport = useRef(false);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const reducedMotion = window.matchMedia(
-      '(prefers-reduced-motion: reduce)',
-    );
-    if (reducedMotion.matches) {
-      video.pause();
-      return;
-    }
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let hasLoaded = false;
+
+    const syncPlayback = () => {
+      if (reducedMotion.matches || document.hidden || !isNearViewport.current) {
+        video.pause();
+        return;
+      }
+
+      if (!hasLoaded) {
+        hasLoaded = true;
+        video.load();
+      }
+      void video.play().catch(() => undefined);
+    };
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry.isIntersecting) {
-          void video.play().catch(() => undefined);
-        } else {
-          video.pause();
-        }
+        isNearViewport.current = entry.isIntersecting;
+        syncPlayback();
       },
-      { threshold: 0.18 },
+      { rootMargin: '240px 0px', threshold: 0 },
     );
 
+    const onVisibilityChange = () => syncPlayback();
+    const onMotionPreferenceChange = () => syncPlayback();
+
     observer.observe(video);
-    return () => observer.disconnect();
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    reducedMotion.addEventListener('change', onMotionPreferenceChange);
+
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      reducedMotion.removeEventListener('change', onMotionPreferenceChange);
+      video.pause();
+    };
   }, []);
 
   return (
@@ -565,11 +582,10 @@ function FinalCtaVideo() {
       <video
         ref={videoRef}
         className="final-cta-video"
-        autoPlay
         muted
         loop
         playsInline
-        preload="metadata"
+        preload="none"
         aria-hidden="true"
         tabIndex={-1}
       >
