@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import SiteIntro from '../components/SiteIntro';
+import PlatformsTools from '../components/PlatformsTools';
 import ContactFooter, {
   socialLinks,
   VerticalTextLabel,
@@ -1409,6 +1410,8 @@ export default function Home() {
               ))}
             </div>
           </section>
+
+          <PlatformsTools />
 
           <section
             className="numbers numbers-compact content-section"
